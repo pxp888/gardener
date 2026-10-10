@@ -56,7 +56,7 @@ const CONFIG = {
 };
 
 // ---------------------------------------------------------------------------
-// Gardener prompt (verbatim per spec; operational notes appended at call time)
+// Gardener prompt
 // ---------------------------------------------------------------------------
 
 const GARDENER_PROMPT = `You are the Context Gardener for a coding agent. Your responsibility is to reduce the agent's conversation context while preserving everything necessary to continue its current objective correctly.
@@ -86,7 +86,12 @@ Do not invent facts, infer that an operation succeeded when only an attempt is r
 
 The newest protected turns are outside your editing scope. Preserve their contents exactly.
 
-Produce a compact, factual context replacement. Optimize for the main agent's ability to continue working, not for a comprehensive historical narrative. When uncertain whether information is essential, preserve it in a concise form rather than deleting it.`;
+Produce a compact, factual context replacement. Optimize for the main agent's ability to continue working, not for a comprehensive historical narrative. When uncertain whether information is essential, preserve it in a concise form rather than deleting it.
+
+Operational rules:
+- Keep your internal reasoning/thinking concise. Do not overthink; proceed directly to extracting and updating the state.
+- Your replacement will be shown to the main agent as its session state, in place of the summarized history.
+- Output only the replacement context: no preamble, no closing remarks, no markdown code fences.`;
 
 // ---------------------------------------------------------------------------
 // Planning: what ages out, where the protected tail starts
@@ -170,20 +175,13 @@ function planGarden(projected: ProjectedSessionEntry[]): GardenPlan | null {
 function buildGardenerRequest(plan: GardenPlan, customInstructions?: string): string {
 	const conversationText = serializeConversation(convertToLlm(plan.eligibleMessages));
 
-	const parts: string[] = [
-		GARDENER_PROMPT,
-		[
-			"Operational notes:",
-			"- Your replacement will be shown to the main agent as its session state, in place of the summarized history.",
-			"- Output only the replacement context: no preamble, no closing remarks, no markdown code fences.",
-		].join("\n"),
-	];
+	const parts: string[] = [GARDENER_PROMPT];
 
 	if (plan.previousSummary) {
 		parts.push(
 			"The conversation below is newer than this previous state note. Merge it into an updated state; do not repeat verbatim what is already covered unless it changed.\n<previous-context>\n" +
-				plan.previousSummary +
-				"\n</previous-context>",
+			plan.previousSummary +
+			"\n</previous-context>",
 		);
 	}
 
