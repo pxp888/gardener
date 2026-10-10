@@ -46,13 +46,13 @@ function envInt(name: string, fallback: number, min: number): number {
 
 const CONFIG = {
 	/** Garden after every N completed turns. 0 disables the periodic pass (manual /compact still works). */
-	turns: envInt("PI_GARDENER_TURNS", 1, 0),
+	turns: envInt("PI_GARDENER_TURNS", 3, 0),
 	/** Keep the last K turns verbatim; everything older is folded into the summary. */
 	protectedTurns: envInt("PI_GARDENER_PROTECTED_TURNS", 5, 1),
 	/** Skip a pass when the eligible (aging-out) content is below this many tokens. */
 	minEligibleTokens: 0,
 	/** Max output tokens for the gardener's replacement text. */
-	maxSummaryTokens: 4096,
+	maxSummaryTokens: 8096,
 };
 
 // ---------------------------------------------------------------------------

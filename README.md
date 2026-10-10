@@ -4,6 +4,12 @@
 
 Gardener is a context management extension for the `pi` coding agent (`@earendil-works/pi-coding-agent`). Instead of letting conversation context balloon until hitting token thresholds or context overflow, Gardener continuously prunes older history into a compact, factual state note while keeping the most recent turns untouched.
 
+The goal is to match 'human like' information discarding.  When a person is looking through a file for something and does not find it, they dismiss the file and simply remember their target wasn't there.  An LLM will have that file permanently stuck in the context window.  
+
+This avoids that by running a parallel agent that constantly prunes the context to remove boilerplate, summarize conclusions and failures, while preserving essential information for the task.  
+
+
+
 ---
 
 ## 💡 Why Gardener?
@@ -21,6 +27,9 @@ Default agent compactions usually wait until a hard token cliff (e.g. 100k+ toke
 * **Iterative merging:** Each pass only summarizes newly aged-out turns and merges them into the previous state note, keeping compaction latency and token usage bounded ($O(1)$ per pass).
 * **Consistent model alignment:** The gardener pass uses the session's active model, ensuring the summarizer follows the same reasoning style and capability as the main agent.
 * **Unified `/compact` handling:** Intercepts manual `/compact` commands, context threshold warnings, and overflow recovery to apply the same structured gardener routine.
+
+This should allow logical continuation of long running tasks without exhausting context limits, and in theory should improve reasoning as the model should never into a state of excessive context.  
+
 
 ---
 
@@ -42,6 +51,16 @@ Default agent compactions usually wait until a hard token cliff (e.g. 100k+ toke
 4. **Context Refresh:** Pi replays the compaction summary followed by the kept entries for subsequent agent turns.
 
 ---
+
+## Downsides 
+
+Because this alters context on a regular basis the prefill cache will be discarded regularly.  With an online provider this will significantly increase prefill costs.  If you're running locally, this is less of an issue, but the fact that summarizing is constantly happening will take additional time.  
+
+Normal compaction routines take time as well, but they only run on demand. This runs much more often, takes more tokens, but should also do a better job of preserving information.  
+
+
+-----------
+
 
 ## 🚀 Installation
 
