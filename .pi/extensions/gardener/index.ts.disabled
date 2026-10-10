@@ -22,8 +22,8 @@
  *     are intercepted and routed through the same gardener routine instead of the
  *     default 20k-token keep.
  *
- * Load:      pi --extension ./gardener.ts
- * Install:   cp gardener.ts ~/.pi/agent/extensions/gardener.ts
+ * Load:      auto-discovered from .pi/extensions/gardener/index.ts (project must be trusted)
+ * Global:    cp -r .pi/extensions/gardener ~/.pi/agent/extensions/gardener
  * Tune:      PI_GARDENER_TURNS=3 PI_GARDENER_PROTECTED_TURNS=8 pi ...
  *            (PI_GARDENER_TURNS=0 disables the periodic pass; /compact still gardens)
  */
