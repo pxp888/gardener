@@ -88,6 +88,4 @@ You can modify preservation priorities or adjust operational rules (e.g. formatt
 
 ---
 
-## 📄 License
 
-MIT
