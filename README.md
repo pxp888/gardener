@@ -50,49 +50,9 @@ This should allow logical continuation of long running tasks without exhausting 
 3. **Compaction Draft:** The aged-out turns and previous summary are sent to the model with preservation guidelines. The resulting summary is committed to Pi as a canonical `compaction` boundary entry.
 4. **Context Refresh:** Pi replays the compaction summary followed by the kept entries for subsequent agent turns.
 
----
+----------
 
-## Downsides 
-
-Because this alters context on a regular basis the prefill cache will be discarded regularly.  With an online provider this will significantly increase prefill costs.  If you're running locally, this is less of an issue, but the fact that summarizing is constantly happening will take additional time.  
-
-Normal compaction routines take time as well, but they only run on demand. This runs much more often, takes more tokens, but should also do a better job of preserving information.  
-
-
----
-
-## example test
-
-_This includes results from [memento](https://github.com/pxp888/memento), another context summarization method._
-
-
-
-Task (`goal.md`):
-
-> develop a fastapi todo list app that is publicly available and editable.
-> Users should be able to create and destroy lists.
-> This should be able to display multiple lists, and items should be draggable between lists.
-> this should run in its own venv, and be served on port 8000.
-
-Model: `thinkfarm/qwen3.8:27b-ud-q4_k_m` — 10/11/2026.
-
-|                                    | memento              | gardener          | normal     |
-| ---------------------------------- | --------------------:| -----------------:| ----------:|
-| Assistant turns                    | 13                   | 10                | 16         |
-| Tool results / calls               | 15 / 15              | 10 / 10           | 17 / 17    |
-| Compactions                        | 5 (≈1 per 2.6 turns) | 2 (1 per 5 turns) | 0          |
-| ↑ input tokens                     | 27k                  | 33k               | 10k        |
-| ↓ output tokens                    | 14k                  | 17k               | 18k        |
-| R cache-read tokens                | 157k                 | 137k              | 309k       |
-| **Total tokens (↑+↓+R)**           | **≈198k**            | **≈187k**         | **≈337k**  |
-| Avg context per turn ((↑+R)/turns) | ≈14.2k               | 17.0k             | ≈19.9k     |
-| **Est. cost**                      | **$0.065**           | **$0.076**        | **$0.078** |
-
-*Cost = ↑×$0.45/M + ↓×$3.20/M + R×$0.05/M (assumed prices).*
-
-On this task both gated variants beat normal on total tokens, and per-turn context stays flat instead of growing with each step.   
-
-
+[Initial test results](https://github.com/pxp888/memento/blob/main/testing.md)
 
 -----------
 

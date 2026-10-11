@@ -51,8 +51,6 @@ const CONFIG = {
 	protectedTurns: envInt("PI_GARDENER_PROTECTED_TURNS", 5, 1),
 	/** Skip a pass when the eligible (aging-out) content is below this many tokens. */
 	minEligibleTokens: 0,
-	/** Max output tokens for the gardener's replacement text. */
-	maxSummaryTokens: 8096,
 };
 
 // ---------------------------------------------------------------------------
@@ -213,7 +211,7 @@ async function runGarden(
 					},
 				],
 			},
-			{ maxTokens: CONFIG.maxSummaryTokens, cacheRetention: "none", sessionId: randomUUID(), signal },
+			{ ...(model.maxTokens ? { maxTokens: model.maxTokens } : {}), cacheRetention: "none", sessionId: randomUUID(), signal },
 		);
 
 		const summary = response.content
