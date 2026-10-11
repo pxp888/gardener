@@ -8,13 +8,18 @@ The goal is to match 'human like' information discarding.  When a person is look
 
 This avoids that by running a parallel agent that constantly prunes the context to remove boilerplate, summarize conclusions and failures, while preserving essential information for the task.  
 
+This isn't so different from the standard compaction routine that many coding agents use, except instead of running in bulk when the model is near capacity, it runs every couple of turns. (default 3)  The idea is that the gardening agent, or curator can focus on keeping what is important to solve the task at hand, rather than have to figure out what to keep in one pass of a full context window.  
 
+There is also the added benefit of the agent operating without a full context window, which can stress attention, and slow down the output.  
+
+Surprisingly, this doesn't carry a token cost penalty as you would assume either.  Initial tests show a slight savings is total tokens used.  
 
 ---
 
 ## 💡 Why Gardener?
 
 In long coding sessions, conversation context quickly accumulates noise:
+
 * Multi-page tool outputs and logs.
 * Failed search attempts and discarded exploration paths.
 * Boilerplate code that can easily be regenerated.
@@ -22,6 +27,7 @@ In long coding sessions, conversation context quickly accumulates noise:
 Default agent compactions usually wait until a hard token cliff (e.g. 100k+ tokens or overflow recovery), triggering a massive truncation pass. 
 
 **Gardener takes a continuous approach:**
+
 * **Rolling window:** Keeps the last $K$ turns (default 5) completely untouched.
 * **Factual extraction:** As older turns age out of the protected window, they are summarized into high-signal conclusions (e.g. *"checked records.db — only contains expense summaries"* or *"added health check endpoint to server.py"*).
 * **Iterative merging:** Each pass only summarizes newly aged-out turns and merges them into the previous state note, keeping compaction latency and token usage bounded ($O(1)$ per pass).
@@ -30,25 +36,19 @@ Default agent compactions usually wait until a hard token cliff (e.g. 100k+ toke
 
 This should allow logical continuation of long running tasks without exhausting context limits, and in theory should improve reasoning as the model should never into a state of excessive context.  
 
-
 ---
 
 ## 🔍 How It Works
 
-```
-[ Previous State Summary ] + [ Newly Aged-Out Turns ]
-                  │
-                  ▼
-          (Gardener Model Call)
-                  │
-                  ▼
-[ New State Note ] + [ Protected Tail (Last K Turns Verbatim) ]
-```
+![gardener graphic](.assets/gardener.jpeg)
 
-1. **Turn counting:** Pi counts turns at assistant response boundaries (`turn_end`).
-2. **Planning:** At each boundary after every $N$ turns, Gardener checks if turns have aged out past the protected tail ($K$).
-3. **Compaction Draft:** The aged-out turns and previous summary are sent to the model with preservation guidelines. The resulting summary is committed to Pi as a canonical `compaction` boundary entry.
-4. **Context Refresh:** Pi replays the compaction summary followed by the kept entries for subsequent agent turns.
+
+
+
+
+1. **Planning:** At each boundary after every $N$ turns, Gardener checks if turns have aged out past the protected tail ($K$).
+2. **Compaction Draft:** The aged-out turns and previous summary are sent to the model with preservation guidelines. The resulting summary is committed to Pi as a canonical `compaction` boundary entry.
+3. **Context Refresh:** Pi replays the compaction summary followed by the kept entries for subsequent agent turns.
 
 ----------
 
@@ -56,19 +56,23 @@ This should allow logical continuation of long running tasks without exhausting 
 
 -----------
 
-
 ## 🚀 Installation
 
 ### Project-level (automatic discovery)
+
 Place the extension in your project's `.pi` configuration directory:
+
 ```bash
 mkdir -p .pi/extensions/gardener
 cp index.ts .pi/extensions/gardener/index.ts
 ```
+
 *(Note: Your project workspace must be trusted by pi).*
 
 ### Global extension
+
 To enable Gardener across all sessions:
+
 ```bash
 mkdir -p ~/.pi/agent/extensions/gardener
 cp index.ts ~/.pi/agent/extensions/gardener/index.ts
@@ -80,10 +84,10 @@ cp index.ts ~/.pi/agent/extensions/gardener/index.ts
 
 Tune Gardener via environment variables:
 
-| Variable | Default | Description |
-| :--- | :---: | :--- |
-| `PI_GARDENER_TURNS` | `1` | Garden every $N$ completed turns. Set to `0` to disable automatic periodic gardening (manual `/compact` will still use Gardener). |
-| `PI_GARDENER_PROTECTED_TURNS` | `5` | Number of recent assistant turns to keep verbatim. |
+| Variable                      | Default | Description                                                                                                                       |
+|:----------------------------- |:-------:|:--------------------------------------------------------------------------------------------------------------------------------- |
+| `PI_GARDENER_TURNS`           | `1`     | Garden every $N$ completed turns. Set to `0` to disable automatic periodic gardening (manual `/compact` will still use Gardener). |
+| `PI_GARDENER_PROTECTED_TURNS` | `5`     | Number of recent assistant turns to keep verbatim.                                                                                |
 
 ### Tuning Tips
 
@@ -101,5 +105,3 @@ All persona instructions, preservation criteria, and operational rules are centr
 You can modify preservation priorities or adjust operational rules (e.g. formatting constraints, thinking/reasoning guidelines) directly in that single location.
 
 ---
-
-
