@@ -35,3 +35,16 @@ gardener:
   # - "system": Injected as a structured <gardener-state> block in/after the system prompt.
   # - "user_assistant": Injected as a synthetic user context prompt + assistant acknowledgment.
   state_injection_mode: "system"
+
+  # Strategy for context reduction:
+  # - "carve": (Recommended) Surgical in-place editing. The gardener uses editing tools
+  #   to carve out boilerplate, verbose tool dumps, and dead-ends while preserving code,
+  #   findings, and conversation structure verbatim. Zero "telephone game" degradation.
+  # - "summarize": Full monolithic rewrite. Replaces all older turns with a single <gardener-state> block.
+  strategy: "carve"
+
+  # Maximum iterative editing rounds allowed for the carver in a single gardening pass.
+  max_carve_steps: 4
+
+  # Debug mode: writes 'before.md' and 'after.md' to the workspace after each compaction run.
+  debug: true

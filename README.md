@@ -1,136 +1,92 @@
-# 🌿 Gardener
+# 🌿 Gardener Proxy
 
-**Turn-based context compaction extension for [pi](https://github.com/earendil-works/pi)**
+**Turn-based context compaction reverse proxy for LLMs and coding agents**
 
-Gardener is a context management extension for the `pi` coding agent (`@earendil-works/pi-coding-agent`). Instead of letting conversation context balloon until hitting token thresholds or context overflow, Gardener continuously prunes older history into a compact, factual state note while keeping the most recent turns untouched.
+Gardener is an OpenAI API-compatible reverse proxy that sits transparently between your LLM clients (Open WebUI, LibreChat, Cline, Continue, Cursor, custom agents) and any upstream provider (OpenAI, OpenRouter, Ollama, vLLM, etc.).
 
-The goal is to match 'human like' information discarding.  When a person is looking through a file for something and does not find it, they dismiss the file and simply remember their target wasn't there.  An LLM will have that file permanently stuck in the context window.  
-
-This avoids that by running a parallel agent that constantly prunes the context to remove boilerplate, summarize conclusions and failures, while preserving essential information for the task.  
-
-This isn't so different from the standard compaction routine that many coding agents use, except instead of running in bulk when the model is near capacity, it runs every couple of turns. (default 3)  The idea is that the gardening agent, or curator can focus on keeping what is important to solve the task at hand, rather than have to figure out what to keep in one pass of a full context window.  
-
-There is also the added benefit of the agent operating without a full context window, which can stress attention, and slow down the output.  
-
-Surprisingly, this doesn't carry a token cost penalty as you would assume either.  Initial tests show a slight savings is total tokens used.  
+Instead of letting conversation context balloon until hitting token limits or triggering monolithic context overflows, Gardener continuously and intelligently prunes older history while keeping the most recent turns untouched.
 
 ---
 
 ## 💡 Why Gardener?
 
-In long coding sessions, conversation context quickly accumulates noise:
+In long coding and chat sessions, context quickly accumulates noise:
 
-* Multi-page tool outputs and logs.
+* Multi-page tool outputs, file dumps, and build logs.
 * Failed search attempts and discarded exploration paths.
 * Boilerplate code that can easily be regenerated.
 
-Default agent compactions usually wait until a hard token cliff (e.g. 100k+ tokens or overflow recovery), triggering a massive truncation pass. 
+Traditional agents wait until hitting a token cliff (e.g. 100k+ tokens) and perform a massive, lossy summary pass that suffers from "telephone game" degradation.
 
-**Gardener takes a continuous approach:**
+**Gardener takes a continuous, turn-based approach:**
 
-* **Rolling window:** Keeps the last $K$ turns (default 5) completely untouched.
-* **Factual extraction:** As older turns age out of the protected window, they are summarized into high-signal conclusions (e.g. *"checked records.db — only contains expense summaries"* or *"added health check endpoint to server.py"*).
-* **Iterative merging:** Each pass only summarizes newly aged-out turns and merges them into the previous state note, keeping compaction latency and token usage bounded ($O(1)$ per pass).
-* **Consistent model alignment:** The gardener pass uses the session's active model, ensuring the summarizer follows the same reasoning style and capability as the main agent.
-* **Unified `/compact` handling:** Intercepts manual `/compact` commands, context threshold warnings, and overflow recovery to apply the same structured gardener routine.
-
-This should allow logical continuation of long running tasks without exhausting context limits, and in theory should improve reasoning as the model should never into a state of excessive context.  
-
----
-
-## 🔍 How It Works
-
-![gardener graphic](.assets/gardener.jpeg)
+* **Rolling Protected Window:** Keeps the last $K$ assistant turns (default `5`) completely untouched and verbatim.
+* **Continuous Pruning:** As older turns age out past the protected window every $N$ turns (default `3`), Gardener reduces the aged-out turns before forwarding to upstream.
+* **Dual Compaction Strategies:** Choose between surgical in-place editing (`carve`) or unified state summarization (`summarize`).
+* **Consistent Model Alignment:** Gardener can mirror the client request's model or use a dedicated fast/local model for compaction.
 
 
-
-
-
-1. **Planning:** At each boundary after every $N$ turns, Gardener checks if turns have aged out past the protected tail ($K$).
-2. **Compaction Draft:** The aged-out turns and previous summary are sent to the model with preservation guidelines. The resulting summary is committed to Pi as a canonical `compaction` boundary entry.
-3. **Context Refresh:** Pi replays the compaction summary followed by the kept entries for subsequent agent turns.
-
-----------
 
 [Initial test results](https://github.com/pxp888/memento/blob/main/testing.md)
 
------------
+---
 
-## 🚀 Installation
+## 🔍 Architecture & How It Works
 
-### Project-level (automatic discovery)
-
-Place the extension in your project's `.pi` configuration directory:
-
-```bash
-mkdir -p .pi/extensions/gardener
-cp index.ts .pi/extensions/gardener/index.ts
-```
-
-*(Note: Your project workspace must be trusted by pi).*
-
-### Global extension
-
-To enable Gardener across all sessions:
-
-```bash
-mkdir -p ~/.pi/agent/extensions/gardener
-cp index.ts ~/.pi/agent/extensions/gardener/index.ts
-```
+![gardener](.assets/proxy.jpeg)
 
 ---
 
-## 🌐 Mode 2: Universal FastAPI Proxy (Any Frontend or Harness)
+## ✂️ Compaction Strategies
 
-Gardener is also available as a standalone OpenAI API-compatible reverse proxy. It sits between **any** frontend, UI, or coding agent harness (Open WebUI, LibreChat, Cline, Continue, TypingMind, custom scripts) and an upstream provider (OpenAI, OpenRouter, Ollama, vLLM, etc.).
+Gardener supports two compaction modes configured via `gardener.strategy`:
 
-```
-Frontend (Open WebUI / Cline / Custom)
-        │  POST /v1/chat/completions (full history)
-        ▼
-┌────────────────────────────────────────────────────────┐
-│ 🌿 Gardener Proxy (http://127.0.0.1:8012)              │
-│                                                        │
-│ 1. Tracks turns per session                            │
-│ 2. When turns age out past protected tail (K):         │
-│    Runs gardener model to summarize older turns        │
-│ 3. Rewrites messages payload:                          │
-│    [System Prompt] + [<gardener-state>] + [Tail]       │
-│ 4. Forwards to upstream (supports SSE streaming)       │
-└────────────────────────────────────────────────────────┘
-        │
-        ▼
-Upstream Provider (OpenAI / OpenRouter / Ollama / etc.)
-```
+### 1. `carve` (Recommended — Surgical In-Place Editing)
+
+The gardener model acts as an editor with tool-calling capabilities (`replace_message_content`, `remove_message`). It inspects the aged-out messages and surgically trims verbose file dumps, large log outputs, and failed searches, while keeping the user's original wording and key code blocks completely intact.
+
+* **Zero telephone game loss:** Original messages remain in their authentic positions.
+* **OpenAI API Schema preserved:** Tool messages and role invariants are strictly maintained.
+
+### 2. `summarize` (State Note Replacement)
+
+The older aged-out turns are folded into a structured `<gardener-state>` summary note and injected into or alongside the system prompt, followed by the verbatim protected tail.
+
+---
+
+## 🚀 Getting Started
 
 ### 1. Setup & Installation
 
-Set up the virtual environment and install dependencies:
+Clone the repository, create a virtual environment, and install dependencies:
 
 ```bash
+git clone https://github.com/pxp888/gardener.git
+cd gardener
 python3 -m venv venv
 ./venv/bin/pip install -e .
 ```
 
 ### 2. Configuration (`config.yaml`)
 
-Edit `config.yaml` (or copy from `config.example.yaml`):
+Copy `config.example.yaml` to `config.yaml` and configure your upstream:
 
 ```yaml
 server:
   host: "127.0.0.1"
-  port: 8012
+  port: 8000
 
 upstream:
   base_url: "https://api.openai.com/v1"
   api_key: ""  # Or set via OPENAI_API_KEY environment variable
 
 gardener:
-  model: ""           # If empty, mirrors the model requested by the client
+  strategy: "carve"   # "carve" (surgical editing) or "summarize" (state note)
   turns: 3            # Garden every N turns
   protected_turns: 5  # Keep last K assistant turns untouched
   min_tokens_to_garden: 100
-  state_injection_mode: "system"  # "system" or "user_assistant"
+  model: ""           # If empty, mirrors the model requested by client
+  debug: false        # Set to true to dump before.md and after.md
 ```
 
 ### 3. Running the Proxy
@@ -141,57 +97,74 @@ Start the server using the CLI:
 ./venv/bin/gardener
 ```
 
-Or configure on the fly via CLI options:
+Or pass CLI arguments directly:
 
 ```bash
-./venv/bin/gardener --port 8012 --upstream https://api.openai.com/v1 --turns 3 --protected-turns 5
+./venv/bin/gardener --port 8000 --upstream https://api.openai.com/v1 --turns 3 --protected-turns 5
 ```
 
 ### 4. Connect Your Client
 
-Point any OpenAI-compatible client or frontend to the proxy:
+Point any OpenAI-compatible client, UI, or SDK to the proxy endpoint:
 
 ```bash
-export OPENAI_BASE_URL="http://127.0.0.1:8012/v1"
+export OPENAI_BASE_URL="http://127.0.0.1:8000/v1"
 ```
 
 ---
 
 ## ⚙️ Configuration Reference
 
-### Proxy CLI Flags & Config Options
+### CLI Flags & Config Options
 
-| Setting / Flag | CLI Option | Default | Description |
-|:-------------- |:----------:|:-------:|:----------- |
-| `server.port` | `-p`, `--port` | `8012` | Port the proxy listens on. |
-| `server.host` | `-H`, `--host` | `127.0.0.1` | Host address to bind to. |
-| `upstream.base_url` | `-u`, `--upstream` | `https://api.openai.com/v1` | Upstream OpenAI-compatible API base URL. |
-| `gardener.model` | `-m`, `--model` | `""` (mirror) | Model used for compaction. If empty, mirrors requested model. |
-| `gardener.turns` | `-n`, `--turns` | `3` | Frequency: garden every $N$ turns. |
-| `gardener.protected_turns` | `-k`, `--protected-turns` | `5` | Number of recent assistant turns to keep verbatim. |
+| Setting / Flag                  | CLI Option                | Default                     | Description                                                   |
+|:------------------------------- |:-------------------------:|:---------------------------:|:------------------------------------------------------------- |
+| `server.port`                   | `-p`, `--port`            | `8000`                      | Port the proxy listens on.                                    |
+| `server.host`                   | `-H`, `--host`            | `127.0.0.1`                 | Host address to bind to.                                      |
+| `upstream.base_url`             | `-u`, `--upstream`        | `https://api.openai.com/v1` | Upstream OpenAI-compatible API base URL.                      |
+| `gardener.strategy`             | —                         | `carve`                     | Compaction strategy: `carve` or `summarize`.                  |
+| `gardener.model`                | `-m`, `--model`           | `""` (mirror)               | Model used for compaction. If empty, mirrors requested model. |
+| `gardener.turns`                | `-n`, `--turns`           | `3`                         | Frequency: garden every $N$ turns.                            |
+| `gardener.protected_turns`      | `-k`, `--protected-turns` | `5`                         | Number of recent assistant turns to keep verbatim.            |
+| `gardener.min_tokens_to_garden` | —                         | `100`                       | Skip compaction if eligible history is below token threshold. |
+| `gardener.debug`                | —                         | `false`                     | Dump `before.md` and `after.md` on each compaction run.       |
 
-### Pi Extension Environment Variables
+### Environment Variables
 
-| Variable                      | Default | Description                                                                                                                       |
-|:----------------------------- |:-------:|:--------------------------------------------------------------------------------------------------------------------------------- |
-| `PI_GARDENER_TURNS`           | `3`     | Garden every $N$ completed turns. Set to `0` to disable automatic periodic gardening (manual `/compact` will still use Gardener). |
-| `PI_GARDENER_PROTECTED_TURNS` | `5`     | Number of recent assistant turns to keep verbatim.                                                                                |
+| Variable                   | Description                                          |
+|:-------------------------- |:---------------------------------------------------- |
+| `OPENAI_API_KEY`           | Upstream API key if not specified in config.         |
+| `OPENAI_BASE_URL`          | Override upstream base URL.                          |
+| `GARDENER_HOST`            | Proxy bind host.                                     |
+| `GARDENER_PORT`            | Proxy bind port.                                     |
+| `GARDENER_TURNS`           | Number of turns between gardening passes.            |
+| `GARDENER_PROTECTED_TURNS` | Number of recent assistant turns kept untouched.     |
+| `GARDENER_STRATEGY`        | Compaction strategy (`carve` or `summarize`).        |
+| `GARDENER_DEBUG`           | Set to `1` or `true` to enable debug markdown dumps. |
 
-### Tuning Tips
+---
 
-* **API Providers & Prompt Caching:**  
-  If you are using providers with prefix caching (Claude, OpenAI, Gemini), running every turn (`turns=1`) constantly alters the prompt prefix. Setting `turns=3` or `5` preserves prompt cache hits across intermediate turns.
-* **Local Models & `llama.cpp`:**  
-  For local models (e.g. `qwen3.8:27b`), setting `turns=3` avoids waiting for local generation after every single step.
+## 🐛 Debugging Context Compaction
+
+Enable `debug: true` in `config.yaml` or set `GARDENER_DEBUG=1`. On every gardening run, Gardener will write two markdown files to your current working directory:
+
+* **`before.md`**: Complete message history and token breakdown before compaction.
+* **`after.md`**: Compacted message history after surgical carving or summarization.
 
 ---
 
-## 📝 Customizing the Prompt
+## 📝 Customizing Prompts
 
-All persona instructions, preservation criteria, and operational rules are centralized in:
-* **Proxy:** `GARDENER_PROMPT` inside `gardener/prompt.py`
-* **Pi Extension:** `GARDENER_PROMPT` inside `.pi/extensions/gardener/index.ts`
+Persona instructions, preservation priorities, and carving criteria are defined in:
 
-You can modify preservation priorities or adjust operational rules (formatting constraints, thinking/reasoning guidelines) directly in those files.
+* `gardener/prompt.py`: Contains `CARVER_SYSTEM_PROMPT` and `GARDENER_PROMPT`.
 
 ---
+
+## 🧪 Testing
+
+Run test suite with pytest:
+
+```bash
+./venv/bin/pytest
+```

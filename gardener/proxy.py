@@ -11,6 +11,8 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from gardener.config import AppConfig, load_config
 from gardener.planner import SessionManager, derive_session_id, plan_garden
+from gardener.carver import run_garden_carver
+from gardener.debug import dump_compaction_debug
 from gardener.summarizer import run_garden_summarizer
 
 logging.basicConfig(
@@ -50,6 +52,8 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
                 "turns_frequency": config.gardener.turns,
                 "protected_turns": config.gardener.protected_turns,
                 "model": config.gardener.model or "mirror-main-agent",
+                "strategy": config.gardener.strategy,
+                "debug": config.gardener.debug,
             },
             "upstream": config.upstream.base_url,
         }
@@ -125,39 +129,65 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
             )
 
             if plan:
-                logger.info(
-                    f"🌿 [session: {session_id}] Folding {plan.eligible_turns} turn(s) older than "
-                    f"last {config.gardener.protected_turns} turns..."
-                )
-                summary = await run_garden_summarizer(
-                    plan=plan,
-                    requested_model=requested_model,
-                    config=config,
-                    client_auth_header=client_auth,
-                    client=client,
-                )
-
-                if summary:
-                    session.previous_summary = summary
-                    session.turns_since_garden = 0
-
-                    state_block = f"<gardener-state>\n{summary}\n</gardener-state>"
-
-                    if config.gardener.state_injection_mode == "user_assistant":
-                        state_messages = [
-                            {"role": "user", "content": f"Context update:\n{state_block}"},
-                            {"role": "assistant", "content": "Understood. Proceeding with updated context."},
-                        ]
-                    else:
-                        # Default "system" mode: injected as structured system message
-                        state_messages = [{"role": "system", "content": state_block}]
-
-                    # Assembled messages: Base System -> Gardener State -> Protected Tail
-                    modified_messages = plan.system_messages + state_messages + plan.protected_messages
-                    modified_body["messages"] = modified_messages
+                if config.gardener.strategy == "carve":
                     logger.info(
-                        f"🌿 Injected gardener state. Message count reduced from "
-                        f"{len(raw_messages)} to {len(modified_messages)}."
+                        f"🌿 [session: {session_id}] Carving {plan.eligible_turns} turn(s) older than "
+                        f"last {config.gardener.protected_turns} turns..."
+                    )
+                    carved_messages = await run_garden_carver(
+                        plan=plan,
+                        requested_model=requested_model,
+                        config=config,
+                        client_auth_header=client_auth,
+                        client=client,
+                    )
+                    if carved_messages is not None:
+                        session.turns_since_garden = 0
+                        modified_messages = plan.system_messages + carved_messages + plan.protected_messages
+                        modified_body["messages"] = modified_messages
+                        logger.info(
+                            f"🌿 Applied context carving. Messages: {len(raw_messages)} -> {len(modified_messages)}."
+                        )
+                else:
+                    logger.info(
+                        f"🌿 [session: {session_id}] Folding {plan.eligible_turns} turn(s) older than "
+                        f"last {config.gardener.protected_turns} turns..."
+                    )
+                    summary = await run_garden_summarizer(
+                        plan=plan,
+                        requested_model=requested_model,
+                        config=config,
+                        client_auth_header=client_auth,
+                        client=client,
+                    )
+
+                    if summary:
+                        session.previous_summary = summary
+                        session.turns_since_garden = 0
+
+                        state_block = f"<gardener-state>\n{summary}\n</gardener-state>"
+
+                        if config.gardener.state_injection_mode == "user_assistant":
+                            state_messages = [
+                                {"role": "user", "content": f"Context update:\n{state_block}"},
+                                {"role": "assistant", "content": "Understood. Proceeding with updated context."},
+                            ]
+                        else:
+                            # Default "system" mode: injected as structured system message
+                            state_messages = [{"role": "system", "content": state_block}]
+
+                        # Assembled messages: Base System -> Gardener State -> Protected Tail
+                        modified_messages = plan.system_messages + state_messages + plan.protected_messages
+                        modified_body["messages"] = modified_messages
+                        logger.info(
+                            f"🌿 Injected gardener state. Message count reduced from "
+                            f"{len(raw_messages)} to {len(modified_messages)}."
+                        )
+                if config.gardener.debug and modified_body["messages"] != raw_messages:
+                    dump_compaction_debug(
+                        before_messages=raw_messages,
+                        after_messages=modified_body["messages"],
+                        strategy=config.gardener.strategy,
                     )
             else:
                 logger.debug(f"[session: {session_id}] Turn criteria met, but insufficient aged-out tokens to garden.")

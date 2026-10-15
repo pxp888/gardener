@@ -85,7 +85,7 @@ def build_gardener_user_request(
     previous_summary: Optional[str] = None,
     custom_instructions: Optional[str] = None,
 ) -> str:
-    """Assemble the gardener prompt matching Pi's buildGardenerRequest."""
+    """Assemble the gardener prompt for summarization."""
     conversation_text = serialize_messages(eligible_messages)
 
     parts: List[str] = [GARDENER_PROMPT]
@@ -104,3 +104,148 @@ def build_gardener_user_request(
     parts.append(f"<conversation>\n{conversation_text}\n</conversation>")
 
     return "\n\n".join(parts)
+
+
+CARVER_SYSTEM_PROMPT = """You are the Context Carver for a coding agent.
+Your responsibility is to reduce conversation bloat while keeping critical code, findings, user constraints, and architectural decisions 100% intact.
+
+Instead of writing a broad summary from scratch, you have surgical editing tools to CARVE OUT the fluff from the historical conversation:
+1. `replace_message_content(message_index, target_content, replacement_content)`:
+   - Replaces exact substrings in a message with a concise replacement, or with "" to delete.
+   - Use this to prune large tool outputs (file dumps, logs, compiler output) down to just their essential findings, or to trim rambling explanations.
+   - `target_content` must match the existing message text verbatim.
+2. `remove_message(message_index, reason)`:
+   - Removes an entire message when a turn was an aborted dead-end or superseded confusion.
+3. `finish(notes)`:
+   - Call this when all unnecessary fluff has been carved out.
+
+Carving Guidelines:
+- PRESERVE:
+  * Working code snippets, function signatures, and interface definitions verbatim.
+  * Explicit user requirements, preferences, and constraints.
+  * Final conclusions of investigations (e.g. 'auth handled in middleware.py').
+  * Active TODOs, unresolved blockers, and current architectural decisions.
+- CARVE OUT:
+  * Verbose tool results (large file dumps, grep outputs with dozens of matches, repetitive test logs).
+  * Redundant boilerplate that can easily be regenerated.
+  * Aborted investigations and dead-ends (replace with a 1-sentence finding or remove).
+
+You may think step-by-step and make multiple edits across rounds. When the context is lean and clean, call finish."""
+
+CARVER_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "replace_message_content",
+            "description": "Surgically replace an exact substring within a message's content. Use an empty string '' as replacement_content to delete, or provide a concise summary.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "message_index": {
+                        "type": "integer",
+                        "description": "The zero-based index of the message to modify (as labeled in the conversation)."
+                    },
+                    "target_content": {
+                        "type": "string",
+                        "description": "The exact character substring to find and replace in the message."
+                    },
+                    "replacement_content": {
+                        "type": "string",
+                        "description": "The replacement text (can be '' to delete, or a concise factual note)."
+                    }
+                },
+                "required": ["message_index", "target_content", "replacement_content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "remove_message",
+            "description": "Remove an entire message from the conversation (e.g. an irrelevant dead-end turn).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "message_index": {
+                        "type": "integer",
+                        "description": "The zero-based index of the message to remove."
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Brief explanation of why this message is being removed."
+                    }
+                },
+                "required": ["message_index"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "finish",
+            "description": "Signal that context carving is complete and the remaining context is clean and minimal.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "notes": {
+                        "type": "string",
+                        "description": "Brief summary of what was carved or preserved."
+                    }
+                }
+            }
+        }
+    }
+]
+
+
+def format_messages_for_carver(messages: List[Dict[str, Any]]) -> str:
+    """Format messages array with explicit indices for surgical editing."""
+    parts: List[str] = []
+    for idx, msg in enumerate(messages):
+        role = msg.get("role", "unknown").upper()
+        content = msg.get("content")
+        if isinstance(content, list):
+            text_pieces = []
+            for item in content:
+                if isinstance(item, dict) and item.get("type") == "text":
+                    text_pieces.append(item.get("text", ""))
+                elif isinstance(item, str):
+                    text_pieces.append(item)
+            text_content = "\n".join(text_pieces)
+        elif content is None:
+            text_content = ""
+        else:
+            text_content = str(content)
+
+        header = f"=== [Message Index: {idx} | Role: {role}"
+        tool_id = msg.get("tool_call_id")
+        if tool_id:
+            header += f" | tool_call_id: {tool_id}"
+        header += " ] ==="
+
+        tool_calls = msg.get("tool_calls")
+        tc_info = ""
+        if tool_calls and isinstance(tool_calls, list):
+            calls_repr = []
+            for tc in tool_calls:
+                func = tc.get("function", {})
+                calls_repr.append(f"{func.get('name')}({func.get('arguments', '')}) [id: {tc.get('id', '')}]")
+            tc_info = f"[Tool Calls]: {'; '.join(calls_repr)}\n"
+
+        parts.append(f"{header}\n{tc_info}{text_content}".rstrip())
+    return "\n\n".join(parts)
+
+
+def build_carver_user_request(
+    eligible_messages: List[Dict[str, Any]],
+    custom_instructions: Optional[str] = None,
+) -> str:
+    """Assemble the prompt requesting surgical carving of eligible messages."""
+    formatted = format_messages_for_carver(eligible_messages)
+    req = [
+        f"Review the eligible conversation messages below (Indices 0 to {len(eligible_messages)-1}). Use your editing tools to carve out boilerplate, verbose tool dumps, and dead-ends while preserving code, constraints, and findings verbatim.",
+        f"<eligible-conversation count={len(eligible_messages)}>\n{formatted}\n</eligible-conversation>"
+    ]
+    if custom_instructions and custom_instructions.strip():
+        req.append(f"Custom user focus: {custom_instructions.strip()}")
+    return "\n\n".join(req)
