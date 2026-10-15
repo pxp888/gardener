@@ -29,6 +29,10 @@ Traditional agents wait until hitting a token cliff (e.g. 100k+ tokens) and perf
 
 [Initial test results](https://github.com/pxp888/memento/blob/main/testing.md)
 
+*note - tests above happened with the older state summarizing method, not the newer carve method.*
+
+
+
 ---
 
 ## 🔍 Architecture & How It Works
