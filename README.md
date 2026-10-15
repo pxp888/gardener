@@ -80,28 +80,118 @@ cp index.ts ~/.pi/agent/extensions/gardener/index.ts
 
 ---
 
-## ⚙️ Configuration
+## 🌐 Mode 2: Universal FastAPI Proxy (Any Frontend or Harness)
 
-Tune Gardener via environment variables:
+Gardener is also available as a standalone OpenAI API-compatible reverse proxy. It sits between **any** frontend, UI, or coding agent harness (Open WebUI, LibreChat, Cline, Continue, TypingMind, custom scripts) and an upstream provider (OpenAI, OpenRouter, Ollama, vLLM, etc.).
+
+```
+Frontend (Open WebUI / Cline / Custom)
+        │  POST /v1/chat/completions (full history)
+        ▼
+┌────────────────────────────────────────────────────────┐
+│ 🌿 Gardener Proxy (http://127.0.0.1:8012)              │
+│                                                        │
+│ 1. Tracks turns per session                            │
+│ 2. When turns age out past protected tail (K):         │
+│    Runs gardener model to summarize older turns        │
+│ 3. Rewrites messages payload:                          │
+│    [System Prompt] + [<gardener-state>] + [Tail]       │
+│ 4. Forwards to upstream (supports SSE streaming)       │
+└────────────────────────────────────────────────────────┘
+        │
+        ▼
+Upstream Provider (OpenAI / OpenRouter / Ollama / etc.)
+```
+
+### 1. Setup & Installation
+
+Set up the virtual environment and install dependencies:
+
+```bash
+python3 -m venv venv
+./venv/bin/pip install -e .
+```
+
+### 2. Configuration (`config.yaml`)
+
+Edit `config.yaml` (or copy from `config.example.yaml`):
+
+```yaml
+server:
+  host: "127.0.0.1"
+  port: 8012
+
+upstream:
+  base_url: "https://api.openai.com/v1"
+  api_key: ""  # Or set via OPENAI_API_KEY environment variable
+
+gardener:
+  model: ""           # If empty, mirrors the model requested by the client
+  turns: 3            # Garden every N turns
+  protected_turns: 5  # Keep last K assistant turns untouched
+  min_tokens_to_garden: 100
+  state_injection_mode: "system"  # "system" or "user_assistant"
+```
+
+### 3. Running the Proxy
+
+Start the server using the CLI:
+
+```bash
+./venv/bin/gardener
+```
+
+Or configure on the fly via CLI options:
+
+```bash
+./venv/bin/gardener --port 8012 --upstream https://api.openai.com/v1 --turns 3 --protected-turns 5
+```
+
+### 4. Connect Your Client
+
+Point any OpenAI-compatible client or frontend to the proxy:
+
+```bash
+export OPENAI_BASE_URL="http://127.0.0.1:8012/v1"
+```
+
+---
+
+## ⚙️ Configuration Reference
+
+### Proxy CLI Flags & Config Options
+
+| Setting / Flag | CLI Option | Default | Description |
+|:-------------- |:----------:|:-------:|:----------- |
+| `server.port` | `-p`, `--port` | `8012` | Port the proxy listens on. |
+| `server.host` | `-H`, `--host` | `127.0.0.1` | Host address to bind to. |
+| `upstream.base_url` | `-u`, `--upstream` | `https://api.openai.com/v1` | Upstream OpenAI-compatible API base URL. |
+| `gardener.model` | `-m`, `--model` | `""` (mirror) | Model used for compaction. If empty, mirrors requested model. |
+| `gardener.turns` | `-n`, `--turns` | `3` | Frequency: garden every $N$ turns. |
+| `gardener.protected_turns` | `-k`, `--protected-turns` | `5` | Number of recent assistant turns to keep verbatim. |
+
+### Pi Extension Environment Variables
 
 | Variable                      | Default | Description                                                                                                                       |
 |:----------------------------- |:-------:|:--------------------------------------------------------------------------------------------------------------------------------- |
-| `PI_GARDENER_TURNS`           | `1`     | Garden every $N$ completed turns. Set to `0` to disable automatic periodic gardening (manual `/compact` will still use Gardener). |
+| `PI_GARDENER_TURNS`           | `3`     | Garden every $N$ completed turns. Set to `0` to disable automatic periodic gardening (manual `/compact` will still use Gardener). |
 | `PI_GARDENER_PROTECTED_TURNS` | `5`     | Number of recent assistant turns to keep verbatim.                                                                                |
 
 ### Tuning Tips
 
 * **API Providers & Prompt Caching:**  
-  If you are using providers with prefix caching (Claude, OpenAI, Gemini), running every turn (`PI_GARDENER_TURNS=1`) constantly alters the prompt prefix. Setting `PI_GARDENER_TURNS=3` or `5` preserves prompt cache hits across intermediate turns.
+  If you are using providers with prefix caching (Claude, OpenAI, Gemini), running every turn (`turns=1`) constantly alters the prompt prefix. Setting `turns=3` or `5` preserves prompt cache hits across intermediate turns.
 * **Local Models & `llama.cpp`:**  
-  For local models (e.g. `qwen3.8:27b`), setting `PI_GARDENER_TURNS=3` avoids waiting for local generation after every single step.
+  For local models (e.g. `qwen3.8:27b`), setting `turns=3` avoids waiting for local generation after every single step.
 
 ---
 
 ## 📝 Customizing the Prompt
 
-All persona instructions, preservation criteria, and operational rules are centralized in `GARDENER_PROMPT` inside [`.pi/extensions/gardener/index.ts`](.pi/extensions/gardener/index.ts).
+All persona instructions, preservation criteria, and operational rules are centralized in:
+* **Proxy:** `GARDENER_PROMPT` inside `gardener/prompt.py`
+* **Pi Extension:** `GARDENER_PROMPT` inside `.pi/extensions/gardener/index.ts`
 
-You can modify preservation priorities or adjust operational rules (e.g. formatting constraints, thinking/reasoning guidelines) directly in that single location.
+You can modify preservation priorities or adjust operational rules (formatting constraints, thinking/reasoning guidelines) directly in those files.
 
 ---

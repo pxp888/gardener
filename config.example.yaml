@@ -1,0 +1,37 @@
+# Gardener Proxy Configuration
+
+server:
+  host: "127.0.0.1"
+  port: 8000
+
+upstream:
+  # Upstream OpenAI-compatible API endpoint
+  base_url: "https://api.openai.com/v1"
+  # API key: can be hardcoded here, or set in environment variable OPENAI_API_KEY,
+  # or passed dynamically by the frontend client in the Authorization header.
+  api_key: ""
+
+gardener:
+  # Model to use for the gardening summarization pass.
+  # If empty or null, Gardener uses the exact same model requested by the main agent.
+  model: ""
+
+  # Garden every N turns.
+  # 1 = every turn, 3 = balanced (recommended with prompt caching).
+  turns: 3
+
+  # Number of recent assistant turns to keep completely verbatim.
+  protected_turns: 5
+
+  # Skip gardening if the older eligible turns contain fewer than this many estimated tokens.
+  min_tokens_to_garden: 100
+
+  # Optional: use a different upstream provider/URL specifically for the gardener model
+  # (e.g. run a fast local Ollama model for gardening while using Claude/OpenAI for the main agent).
+  base_url: ""
+  api_key: ""
+
+  # How the compacted state note is injected into the context:
+  # - "system": Injected as a structured <gardener-state> block in/after the system prompt.
+  # - "user_assistant": Injected as a synthetic user context prompt + assistant acknowledgment.
+  state_injection_mode: "system"
