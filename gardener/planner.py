@@ -91,8 +91,7 @@ def estimate_tokens(messages: List[Dict[str, Any]]) -> int:
 def find_clean_cut_index(messages: List[Dict[str, Any]], protected_turns: int) -> Optional[int]:
     """Find the index where the protected tail begins.
 
-    Walks backward counting assistant turns. Ensures the cut never splits
-    an assistant tool_calls block from its corresponding tool results.
+    Ensures the cut never splits an assistant tool_calls block from its corresponding tool results.
     """
     assistant_indices: List[int] = [
         i for i, m in enumerate(messages) if m.get("role") == "assistant"
@@ -104,26 +103,12 @@ def find_clean_cut_index(messages: List[Dict[str, Any]], protected_turns: int) -
     # The K-th assistant from the end
     target_assistant_idx = assistant_indices[-protected_turns]
 
-    # Walk backwards to find where this turn cycle began
-    cut_idx = target_assistant_idx
-    while cut_idx > 0:
-        prev = messages[cut_idx - 1]
-        prev_role = prev.get("role")
+    # If this assistant was immediately preceded by an intermediate user prompt,
+    # attach that user prompt to the protected turn (unless it is the session origin at index 0).
+    if target_assistant_idx > 1 and messages[target_assistant_idx - 1].get("role") == "user":
+        return target_assistant_idx - 1
 
-        if prev_role == "tool":
-            # If preceded by a tool, this assistant is part of a tool call continuation
-            cut_idx -= 1
-        elif prev_role == "assistant" and prev.get("tool_calls"):
-            # The assistant message that launched the tool calls
-            cut_idx -= 1
-        elif prev_role == "user":
-            # The user message that triggered this whole turn
-            cut_idx -= 1
-            break
-        else:
-            break
-
-    return cut_idx
+    return target_assistant_idx
 
 
 def extract_existing_summary(messages: List[Dict[str, Any]]) -> Tuple[Optional[str], List[Dict[str, Any]]]:

@@ -190,7 +190,10 @@ def create_app(config: Optional[AppConfig] = None) -> FastAPI:
                         strategy=config.gardener.strategy,
                     )
             else:
-                logger.debug(f"[session: {session_id}] Turn criteria met, but insufficient aged-out tokens to garden.")
+                logger.info(
+                    f"🌿 [session: {session_id}] Turn criteria reached ({session.turns_since_garden} turns since garden, {current_assistant_count} assistant turns total), "
+                    f"but eligible context is below threshold (min_tokens={config.gardener.min_tokens_to_garden}, protected_turns={config.gardener.protected_turns})."
+                )
 
         # Forward to upstream LLM provider
         upstream_url = f"{config.upstream.base_url.rstrip('/')}/chat/completions"

@@ -64,3 +64,34 @@ def test_extract_existing_summary():
     assert summary == "Previous notes"
     assert len(cleaned) == 1
     assert cleaned[0]["content"] == "Keep going"
+
+def test_agent_multistep_tool_loop_cut():
+    messages = [
+        {"role": "system", "content": "You are a helpful coding agent."},
+        {"role": "user", "content": "Refactor the module"},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "function": {"name": "ls"}}]},
+        {"role": "tool", "tool_call_id": "c1", "content": "file1.py, file2.py"},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "c2", "function": {"name": "read_file"}}]},
+        {"role": "tool", "tool_call_id": "c2", "content": "def old(): pass"},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "c3", "function": {"name": "edit_file"}}]},
+        {"role": "tool", "tool_call_id": "c3", "content": "ok"},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "c4", "function": {"name": "run_tests"}}]},
+        {"role": "tool", "tool_call_id": "c4", "content": "passed"},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "c5", "function": {"name": "git_commit"}}]},
+        {"role": "tool", "tool_call_id": "c5", "content": "committed"},
+        {"role": "assistant", "content": "", "tool_calls": [{"id": "c6", "function": {"name": "git_push"}}]},
+        {"role": "tool", "tool_call_id": "c6", "content": "pushed"},
+        {"role": "assistant", "content": "All done!"},
+    ]
+    plan = plan_garden(messages, protected_turns=5, min_tokens=5)
+    assert plan is not None
+    assert plan.eligible_turns == 2
+    assert len(plan.eligible_messages) == 5
+    assert plan.eligible_messages[0]["content"] == "Refactor the module"
+    assert plan.eligible_messages[1]["tool_calls"][0]["id"] == "c1"
+    assert plan.eligible_messages[2]["tool_call_id"] == "c1"
+    assert plan.eligible_messages[3]["tool_calls"][0]["id"] == "c2"
+    assert plan.eligible_messages[4]["tool_call_id"] == "c2"
+
+    assert plan.protected_messages[0]["tool_calls"][0]["id"] == "c3"
+    assert plan.protected_messages[-1]["content"] == "All done!"
